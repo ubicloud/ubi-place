@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Ubiplace — a tiny collaborative pixel canvas</title>
+  <meta name="description" content="A shared pixel canvas running on Ubicloud's app service." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2341a6f6'/%3E%3Crect x='3' y='3' width='4' height='4' fill='%23ffcd75'/%3E%3Crect x='9' y='9' width='4' height='4' fill='%23ef7d57'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">▦</span>
+      <span class="title">Ubiplace</span>
+      <span id="live" class="live live--off"><i></i>connecting</span>
+    </div>
+
+    <div class="chips">
+      <div class="chip chip--version" id="chip-version" title="Release running behind your request. Edit VERSION + redeploy to watch it roll.">
+        <span class="chip-k">ver</span><span class="chip-v" id="stat-version">—</span>
+      </div>
+      <div class="chip chip--instance" id="chip-instance" title="The web replica serving you. It changes when the platform swaps this instance during a staggered deploy — with zero downtime.">
+        <span class="chip-k">⬢ inst</span><span class="chip-v" id="stat-instance">—</span>
+      </div>
+      <div class="chip" title="How long this instance has been up.">
+        <span class="chip-k">up</span><span class="chip-v" id="stat-uptime">—</span>
+      </div>
+      <div class="chip" title="SSE clients connected to this instance.">
+        <span class="chip-k">online</span><span class="chip-v" id="stat-online">—</span>
+      </div>
+      <div class="chip" title="Placements waiting for the worker. Rises then drains when the worker redeploys.">
+        <span class="chip-k">queue</span><span class="chip-v" id="stat-queue">—</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <div class="hint" id="hint">scroll to zoom · drag to pan · click to place</div>
+    </div>
+
+    <aside class="sidebar">
+      <section class="card">
+        <h2>You</h2>
+        <div class="you" id="you">
+          <span class="you-name" id="you-name">…</span>
+          <span class="you-count"><b id="you-count">0</b> pixels</span>
+        </div>
+        <div class="cooldown" id="cooldown" hidden>
+          <div class="cooldown-bar" id="cooldown-bar"></div>
+          <span>cooling down…</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Leaderboard</h2>
+        <ol class="leaders" id="leaders"><li class="empty">no pixels yet</li></ol>
+      </section>
+
+      <section class="card deploy-card">
+        <h2>Zero-downtime demo</h2>
+        <p>Watch the <b>ver</b> and <b>⬢ inst</b> chips up top. Redeploy with a
+        changed <code>VERSION</code> (and maybe a new palette color) and they
+        flip <em>v1 → v2</em> one replica at a time — while the canvas keeps
+        painting and never drops a pixel.</p>
+      </section>
+
+      <footer class="madeon">running on <b>Ubicloud app service</b></footer>
+    </aside>
+  </main>
+
+  <div class="palette" id="palette" role="toolbar" aria-label="color palette"></div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

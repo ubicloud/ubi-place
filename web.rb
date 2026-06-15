@@ -1,0 +1,196 @@
+# frozen_string_literal: true
+
+require "roda"
+require "sequel"
+require "json"
+require "base64"
+require "securerandom"
+
+require_relative "lib/db"
+require_relative "lib/canvas"
+require_relative "lib/version"
+require_relative "lib/names"
+require_relative "lib/notifier"
+
+COOLDOWN_MS = Integer(ENV.fetch("COOLDOWN_MS", "200"))
+PIXEL_CHANNEL = "pixel_update"
+PLACE_CHANNEL = "placement_queued"
+
+# Boot: connect, make sure the schema exists, start the LISTEN bridge.
+DB_CONN = DB.connect
+DB.migrate!(DB_CONN)
+NOTIFIER = Notifier.new(DB.url, PIXEL_CHANNEL).start
+
+# Process-wide 1s cache so a crowd of SSE heartbeats doesn't hammer the DB.
+STATS_LOCK = Mutex.new
+STATS_CACHE = { at: Time.at(0), data: nil }
+
+class Web < Roda
+  plugin :public, root: File.expand_path("public", __dir__)
+  plugin :streaming
+  plugin :cookies # response.set_cookie for the painter id
+
+  # ----- helpers (run in the route's instance context) -----
+
+  private
+
+  def db = DB_CONN
+
+  def json(data)
+    response["Content-Type"] = "application/json"
+    JSON.generate(data)
+  end
+
+  # Identify a painter by a long-lived cookie (no login). Created lazily.
+  def painter_id
+    id = request.cookies["pid"]
+    unless id&.match?(/\A[a-f0-9]{16}\z/)
+      id = SecureRandom.hex(8)
+      response.set_cookie("pid", value: id, path: "/", max_age: 31_536_000, same_site: :lax)
+    end
+    id
+  end
+
+  def ensure_painter(id)
+    db[:painter].insert_conflict.insert(id: id, name: Names.random, created_at: Time.now)
+  end
+
+  # All pixels with seq greater than the client's cursor, plus the new cursor.
+  def diff_since(cursor)
+    rows = db[:pixel].where { seq > cursor }.order(:seq).limit(8000).select(:x, :y, :color, :seq).all
+    return [[], cursor] if rows.empty?
+
+    [rows.map { |r| [Canvas.index_for(r[:x], r[:y]), r[:color]] }, rows.last[:seq]]
+  end
+
+  def stats
+    STATS_LOCK.synchronize do
+      if Time.now - STATS_CACHE[:at] > 1
+        STATS_CACHE[:at] = Time.now
+        STATS_CACHE[:data] = {
+          instance: AppVersion::INSTANCE,
+          version: AppVersion::VERSION,
+          uptime: (Time.now - AppVersion::BOOT_AT).round,
+          online: NOTIFIER.size,
+          queue: db[:placement].where(processed_at: nil).count,
+          pixels: (db[:pixel].max(:seq) || 0),
+          leaders: db[:painter].where { pixel_count > 0 }
+            .order(Sequel.desc(:pixel_count)).limit(8).select(:name, :pixel_count).all
+        }
+      end
+      STATS_CACHE[:data]
+    end
+  end
+
+  def sse_event(event, data)
+    "event: #{event}\ndata: #{JSON.generate(data)}\n\n"
+  end
+
+  # ----- routes -----
+
+  route do |r|
+    r.public # static assets (style.css, app.js) from ./public
+
+    r.root do
+      response["Content-Type"] = "text/html"
+      File.read(File.expand_path("public/index.html", __dir__))
+    end
+
+    # TCP health check is all the LB needs, but a real body is handy for debugging.
+    r.get "healthz" do
+      response["Content-Type"] = "text/plain"
+      "ok #{AppVersion::VERSION} #{AppVersion::INSTANCE}"
+    end
+
+    # Packed full canvas for a fast first paint.
+    r.get "snapshot" do
+      row = db[:snapshot].where(id: 1).first
+      data = row ? row[:data] : ("\x00".b * Canvas::SIZE)
+      seq = row ? row[:seq] : 0
+      json(
+        width: Canvas::WIDTH, height: Canvas::HEIGHT, palette: Canvas::PALETTE,
+        cooldown_ms: COOLDOWN_MS, seq: seq, data: Base64.strict_encode64(data)
+      )
+    end
+
+    r.get "diff" do
+      changes, cur = diff_since(request.params["since"].to_i)
+      json(seq: cur, changes: changes)
+    end
+
+    r.get "stats" do
+      json(stats)
+    end
+
+    r.get "me" do
+      id = painter_id
+      ensure_painter(id)
+      p = db[:painter].where(id: id).first
+      json(id: id, name: p[:name], count: p[:pixel_count])
+    end
+
+    # Enqueue a pixel. Cheap and fast: cooldown gate + insert into the queue; the
+    # worker applies it. The client renders optimistically so it feels instant.
+    r.post "place" do
+      body = (JSON.parse(request.body.read) rescue {})
+      x = body["x"].to_i
+      y = body["y"].to_i
+      color = body["color"].to_i
+      unless Canvas.in_bounds?(x, y)
+        response.status = 422
+        next json(error: "out of bounds")
+      end
+      unless Canvas.valid_color?(color)
+        response.status = 422
+        next json(error: "bad color")
+      end
+
+      id = painter_id
+      ensure_painter(id)
+      now = Time.now
+      threshold = now - (COOLDOWN_MS / 1000.0)
+      allowed = db[:painter].where(id: id)
+        .where(Sequel.|({ last_placed_at: nil }, (Sequel[:last_placed_at] < threshold)))
+        .update(last_placed_at: now) == 1
+      unless allowed
+        response.status = 429
+        next json(error: "cooldown", cooldown_ms: COOLDOWN_MS)
+      end
+
+      db[:placement].insert(x: x, y: y, color: color, painter_id: id, created_at: now)
+      db.run("NOTIFY #{PLACE_CHANNEL}")
+      json(ok: true)
+    end
+
+    # Server-Sent Events: live pixel diffs + periodic heartbeat (instance/version/
+    # online/queue). The `id:` line is the seq cursor — on reconnect the browser
+    # sends it back as Last-Event-ID, so a client whose connection is dropped
+    # mid-deploy (its replica was swapped) resumes exactly where it left off with
+    # no lost pixels. THIS is what makes a rolling deploy invisible.
+    r.get "events" do
+      response["Content-Type"] = "text/event-stream"
+      response["Cache-Control"] = "no-cache"
+      response["X-Accel-Buffering"] = "no"
+
+      cursor = (request.env["HTTP_LAST_EVENT_ID"] || request.params["since"] || "0").to_i
+      queue = NOTIFIER.subscribe
+      stream(loop: false) do |out|
+        out << sse_event("heartbeat", stats)
+        last_beat = Time.now
+        loop do
+          queue.pop(timeout: 1) # woken by NOTIFY, or 1s tick
+          changes, cursor = diff_since(cursor)
+          out << "id: #{cursor}\nevent: pixels\ndata: #{JSON.generate(changes)}\n\n" unless changes.empty?
+          if Time.now - last_beat >= 3
+            out << sse_event("heartbeat", stats)
+            last_beat = Time.now
+          end
+        end
+      rescue IOError, Errno::EPIPE, Errno::ECONNRESET
+        # client disconnected
+      ensure
+        NOTIFIER.unsubscribe(queue)
+      end
+    end
+  end
+end

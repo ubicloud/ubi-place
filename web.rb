@@ -246,7 +246,7 @@ class Web < Roda
       cursor = (request.env["HTTP_LAST_EVENT_ID"] || request.params["since"] || "0").to_i
       queue = NOTIFIER.subscribe
       stream(loop: false) do |out|
-        out << "retry: 1000\n\n" # reconnect ~1s after a drop (browser default is ~3s)
+        out << "retry: 250\n\n" # reconnect ~250ms after a drop (browser default is ~3s)
         out << sse_event("heartbeat", stats)
         last_beat = Time.now
         loop do

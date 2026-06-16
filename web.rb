@@ -11,10 +11,17 @@ require_relative "lib/canvas"
 require_relative "lib/version"
 require_relative "lib/names"
 require_relative "lib/notifier"
+require_relative "lib/settings"
 
 COOLDOWN_MS = Integer(ENV.fetch("COOLDOWN_MS", "200"))
 PIXEL_CHANNEL = "pixel_update"
 PLACE_CHANNEL = "placement_queued"
+
+# Admin secret, from the Secret Store (injected as env at deploy). When unset,
+# admin features are completely disabled. Holding it lets a client (passing it as
+# ?key= in the URL) clear the board and toggle the ambient bot.
+ADMIN_KEY = ENV["ADMIN_KEY"].to_s
+AMBIENT_DEFAULT = ENV.fetch("AMBIENT", "on") == "on"
 
 # Branding pulled from config. On Ubicloud these come from the app's Secret Store:
 # the VM's managed identity fetches every key at deploy and the platform injects
@@ -78,6 +85,7 @@ class Web < Roda
         STATS_CACHE[:data] = {
           title: TITLE,
           tagline: TAGLINE,
+          ambient: ambient_enabled?,
           instance: AppVersion::INSTANCE,
           version: AppVersion::VERSION,
           uptime: (Time.now - AppVersion::BOOT_AT).round,
@@ -94,6 +102,33 @@ class Web < Roda
 
   def sse_event(event, data)
     "event: #{event}\ndata: #{JSON.generate(data)}\n\n"
+  end
+
+  # ----- admin -----
+
+  def ambient_enabled?
+    Settings.get_bool(db, "ambient_enabled", AMBIENT_DEFAULT)
+  end
+
+  # Constant-time check of the key sent in the X-Admin-Key header. False when no
+  # ADMIN_KEY is configured, so admin is off by default.
+  def admin_ok?
+    return false if ADMIN_KEY.empty?
+
+    provided = request.env["HTTP_X_ADMIN_KEY"].to_s
+    !provided.empty? && Rack::Utils.secure_compare(ADMIN_KEY, provided)
+  end
+
+  # Wipe the board for everyone. Repaints every non-empty cell back to background
+  # with a fresh seq (so it flows out through the normal diff/SSE path — clients
+  # need no special handling), drops the pending queue, and resets the leaderboard.
+  def clear_board!
+    db.transaction do
+      db[:placement].where(processed_at: nil).delete
+      db.run("UPDATE pixel SET color = 0, seq = nextval('canvas_seq'), painter_id = NULL WHERE color <> 0")
+      db[:painter].update(pixel_count: 0)
+    end
+    db.run("NOTIFY #{PIXEL_CHANNEL}")
   end
 
   # ----- routes -----
@@ -138,6 +173,31 @@ class Web < Roda
       ensure_painter(id)
       p = db[:painter].where(id: id).first
       json(id: id, name: p[:name], count: p[:pixel_count])
+    end
+
+    # Admin actions, gated by the X-Admin-Key header (the secret from the store).
+    r.on "admin" do
+      unless admin_ok?
+        response.status = 403
+        next json(error: "forbidden")
+      end
+
+      # Probe used by the client to verify ?key= and learn current state.
+      r.get "status" do
+        json(ok: true, ambient: ambient_enabled?)
+      end
+
+      r.post "clear" do
+        clear_board!
+        json(ok: true)
+      end
+
+      r.post "ambient" do
+        body = (JSON.parse(request.body.read) rescue {})
+        enabled = body["enabled"] ? true : false
+        Settings.set(db, "ambient_enabled", enabled)
+        json(ok: true, ambient: enabled)
+      end
     end
 
     # Enqueue a pixel. Cheap and fast: cooldown gate + insert into the queue; the

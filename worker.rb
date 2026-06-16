@@ -20,6 +20,7 @@ require "pg"
 require_relative "lib/db"
 require_relative "lib/canvas"
 require_relative "lib/names"
+require_relative "lib/settings"
 
 SNAPSHOT_INTERVAL = Float(ENV.fetch("SNAPSHOT_INTERVAL", "3"))
 AMBIENT = ENV.fetch("AMBIENT", "on") == "on"
@@ -80,16 +81,21 @@ def ambient_tick(db, tick)
 end
 
 db = DB_CONN
-db[:painter].insert_conflict.insert(id: AMBIENT_ID, name: "🤖 ambient-bot", created_at: Time.now) if AMBIENT
+# Always ensure the ambient painter exists so the bot can be toggled on later.
+db[:painter].insert_conflict.insert(id: AMBIENT_ID, name: "🤖 ambient-bot", created_at: Time.now)
+# AMBIENT env is just the initial default; admin can flip it live via the setting.
+Settings.default!(db, "ambient_enabled", AMBIENT ? "true" : "false")
 
 # Dedicated raw connection to wake instantly when the web process enqueues work.
 listener = DB.raw_pg
 listener.exec("LISTEN placement_queued")
 
-warn "worker up: ambient=#{AMBIENT} snapshot_interval=#{SNAPSHOT_INTERVAL}s"
+warn "worker up: ambient_default=#{AMBIENT} snapshot_interval=#{SNAPSHOT_INTERVAL}s"
 
 last_snapshot = Time.now
 last_ambient = Time.now
+last_setting = Time.at(0)
+ambient_on = AMBIENT
 ambient_tick_n = 0
 
 loop do
@@ -97,7 +103,12 @@ loop do
   drain(db)
 
   now = Time.now
-  if AMBIENT && (now - last_ambient) >= AMBIENT_INTERVAL
+  # Re-read the admin toggle ~once a second (cheap single-row PK lookup).
+  if now - last_setting >= 1
+    ambient_on = Settings.get_bool(db, "ambient_enabled", AMBIENT)
+    last_setting = now
+  end
+  if ambient_on && (now - last_ambient) >= AMBIENT_INTERVAL
     last_ambient = now
     ambient_tick(db, ambient_tick_n += 1)
   end

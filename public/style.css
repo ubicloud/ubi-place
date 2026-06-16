@@ -155,6 +155,21 @@ body { display: flex; flex-direction: column; }
 .leaders .lname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .leaders .lcount { color: var(--accent2); font: 700 12px var(--mono); }
 
+.admin-card h2 { color: var(--hot); }
+.admin-btn {
+  width: 100%; padding: 9px 12px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--panel2); color: var(--ink);
+  font: 600 13px var(--sans); cursor: pointer; transition: border-color .1s, background .1s;
+}
+.admin-btn:hover { border-color: var(--hot); }
+.admin-danger:hover { background: rgba(239,125,87,.16); color: var(--hot); }
+.admin-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px; font-size: 13px; font-weight: 600;
+}
+.admin-row input { width: 16px; height: 16px; accent-color: var(--good); cursor: pointer; }
+.admin-note { margin: 10px 0 0; font-size: 11px; color: var(--dim); line-height: 1.5; }
+
 .deploy-card p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--dim); }
 .deploy-card b { color: var(--ink); }
 .deploy-card em { color: var(--accent2); font-style: normal; }

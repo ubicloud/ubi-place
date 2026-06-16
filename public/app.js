@@ -110,7 +110,49 @@ async function boot() {
   render();
 
   loadMe();
+  initAdmin();
   connect();
+}
+
+// ---------- admin (unlocked by ?key=, validated server-side) ----------
+
+let adminKey = null;
+
+async function initAdmin() {
+  const k = new URLSearchParams(location.search).get("key");
+  if (!k) return;
+  // Drop the key from the address bar so it isn't bookmarked or shared by accident.
+  history.replaceState({}, "", location.pathname);
+  try {
+    const res = await fetch("/admin/status", { headers: { "X-Admin-Key": k } });
+    if (!res.ok) { toast("admin key rejected"); return; }
+    adminKey = k;
+    showAdmin((await res.json()).ambient);
+  } catch (_) {}
+}
+
+function showAdmin(ambient) {
+  document.getElementById("admin-card").hidden = false;
+  const amb = document.getElementById("admin-ambient");
+  amb.checked = !!ambient;
+  amb.addEventListener("change", async () => {
+    try {
+      const res = await fetch("/admin/ambient", {
+        method: "POST",
+        headers: { "X-Admin-Key": adminKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: amb.checked }),
+      });
+      amb.checked = !!(await res.json()).ambient;
+      toast(`ambient bot ${amb.checked ? "on" : "off"}`);
+    } catch (_) { toast("toggle failed"); }
+  });
+  document.getElementById("admin-clear").addEventListener("click", async () => {
+    if (!confirm("Clear the entire board for everyone?")) return;
+    try {
+      await fetch("/admin/clear", { method: "POST", headers: { "X-Admin-Key": adminKey } });
+      toast("board cleared");
+    } catch (_) { toast("clear failed"); }
+  });
 }
 
 // ---------- live stream ----------
@@ -153,6 +195,11 @@ function applyBranding(s) {
 let prev = { version: null, instance: null };
 function updateBadge(s) {
   applyBranding(s);
+  // Keep the admin toggle in sync with the live state (unless the user is on it).
+  if (adminKey && typeof s.ambient === "boolean") {
+    const amb = document.getElementById("admin-ambient");
+    if (amb && document.activeElement !== amb) amb.checked = s.ambient;
+  }
   setText("stat-version", s.version);
   setText("stat-instance", s.instance);
   setText("stat-uptime", fmtUptime(s.uptime));

@@ -81,12 +81,38 @@ does for everything below.
 | --- | --- | --- |
 | `TITLE` | `Ubiplace` | Header + page title. **Try this one to see the Secret Store in action** — it's sent in the SSE heartbeat, so a redeploy with a new `TITLE` updates the header *live as replicas roll*. |
 | `TAGLINE` | `a tiny collaborative pixel canvas` | Subtitle (used in the document title). |
+| `ADMIN_KEY` | — | Secret that unlocks admin actions. Unset ⇒ admin disabled. See [Admin](#admin). |
 | `APP_VERSION` | contents of `VERSION` file, else `dev` | Release label in the badge. |
 | `COOLDOWN_MS` | `200` | Per-painter cooldown between placements. |
-| `AMBIENT` | `on` | Set to `off` to silence the ambient bot. |
+| `AMBIENT` | `on` | *Initial* ambient-bot state; admin can toggle it live (persisted in the DB). |
 | `AMBIENT_INTERVAL` | `0.4` | Seconds between ambient spray ticks. |
 | `SNAPSHOT_INTERVAL` | `3` | Seconds between snapshot rebuilds. |
 | `CANVAS_WIDTH` / `CANVAS_HEIGHT` | `100` | Grid size (set before first deploy). |
+
+### Admin
+
+Set **`ADMIN_KEY`** in the Config page (it lands in the Secret Store and is
+injected as env at deploy — a real *secret* gating real actions, vs. `TITLE`'s
+plain config). Then open the app with that key as a query param:
+
+```
+https://<app>.ubicloud.app/?key=YOUR_ADMIN_KEY
+```
+
+The client validates the key server-side, removes it from the address bar, and
+reveals an **Admin** panel with:
+
+- **Clear the board** — wipes every cell back to background for all connected
+  clients (and drops the pending queue + resets the leaderboard). It flows through
+  the normal seq/diff/SSE pipeline, so everyone's canvas clears live.
+- **Ambient bot on/off** — toggles the worker's ambient painter at runtime (stored
+  in a `setting` row the worker reads; takes effect within ~1s, no redeploy).
+
+Server-side, every `/admin/*` route requires the key in an `X-Admin-Key` header and
+checks it with a constant-time compare; with no `ADMIN_KEY` configured, admin is
+fully disabled (all admin routes return 403). Note: passing a secret in a URL is
+convenient but not airtight (it can land in browser history / proxy logs), so treat
+`ADMIN_KEY` as a low-stakes demo control, not production-grade authz.
 
 ### Database connection (no secret needed)
 

@@ -102,13 +102,6 @@ body { display: flex; flex-direction: column; }
   box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 0 1px var(--line), 0 0 60px rgba(65,166,246,.12);
   touch-action: none;
 }
-.hint {
-  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
-  font: 500 12px/1 var(--mono); color: var(--dim);
-  background: rgba(12,14,26,.7); border: 1px solid var(--line);
-  padding: 6px 12px; border-radius: 999px; pointer-events: none;
-  transition: opacity .4s;
-}
 
 /* ---------- sidebar ---------- */
 .sidebar {
@@ -170,9 +163,6 @@ body { display: flex; flex-direction: column; }
 .admin-row input { width: 16px; height: 16px; accent-color: var(--good); cursor: pointer; }
 .admin-note { margin: 10px 0 0; font-size: 11px; color: var(--dim); line-height: 1.5; }
 
-.deploy-card p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--dim); }
-.deploy-card b { color: var(--ink); }
-.deploy-card em { color: var(--accent2); font-style: normal; }
 code {
   font: 600 11px var(--mono); background: var(--bg); color: var(--warn);
   padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line);

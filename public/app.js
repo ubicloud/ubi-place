@@ -16,8 +16,11 @@ const state = {
   offCtx: null,
   scale: 6,
   ox: 0, oy: 0,       // top-left offset of the canvas within the viewport
+  hoverX: -1, hoverY: -1, // grid cell under the cursor (-1 = none)
   lastPlace: 0,
 };
+
+const GRID_MIN_SCALE = 6; // only draw gridlines once cells are this big (px)
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -44,10 +47,41 @@ function clampView() {
 function render() {
   if (!state.off) return;
   clampView();
+  const s = state.scale;
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "#0a0c18";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(state.off, state.ox, state.oy, state.W * state.scale, state.H * state.scale);
+  ctx.drawImage(state.off, state.ox, state.oy, state.W * s, state.H * s);
+
+  // gridlines — only when zoomed in enough to be legible; clipped to the viewport
+  if (s >= GRID_MIN_SCALE) {
+    const x0 = Math.max(0, Math.floor(-state.ox / s)), x1 = Math.min(state.W, Math.ceil((canvas.width - state.ox) / s));
+    const y0 = Math.max(0, Math.floor(-state.oy / s)), y1 = Math.min(state.H, Math.ceil((canvas.height - state.oy) / s));
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = x0; x <= x1; x++) {
+      const px = Math.round(state.ox + x * s) + 0.5;
+      ctx.moveTo(px, state.oy + y0 * s); ctx.lineTo(px, state.oy + y1 * s);
+    }
+    for (let y = y0; y <= y1; y++) {
+      const py = Math.round(state.oy + y * s) + 0.5;
+      ctx.moveTo(state.ox + x0 * s, py); ctx.lineTo(state.ox + x1 * s, py);
+    }
+    ctx.stroke();
+  }
+
+  // hover highlight — preview the selected color + outline the cell under the cursor
+  if (state.hoverX >= 0 && state.hoverY >= 0) {
+    const hx = state.ox + state.hoverX * s, hy = state.oy + state.hoverY * s;
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = state.palette[state.color] || "#fff";
+    ctx.fillRect(hx, hy, s, s);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(Math.round(hx) + 1, Math.round(hy) + 1, s - 2, s - 2);
+  }
 }
 
 function centerView() {
@@ -104,8 +138,9 @@ async function boot() {
   applyBranding(snap);
   buildPalette();
   fitView();
-  // initial scale: fit the canvas comfortably in view
-  state.scale = Math.max(2, Math.floor(Math.min(canvas.width / state.W, canvas.height / state.H) * 0.82));
+  // initial scale: fit-to-view, then 2x for chunkier pixels (pan to see the rest)
+  const fit = Math.min(canvas.width / state.W, canvas.height / state.H) * 0.82;
+  state.scale = Math.max(4, Math.floor(fit) * 2);
   centerView();
   render();
 
@@ -281,6 +316,7 @@ function selectColor(i) {
   state.color = i;
   [...document.querySelectorAll(".swatch")].forEach((s, idx) =>
     s.classList.toggle("sel", idx + 1 === i));
+  scheduleRender(); // refresh the hover preview to the new color
 }
 
 // ---------- input: pan / zoom / place ----------
@@ -293,6 +329,15 @@ wrap.addEventListener("pointerdown", (e) => {
 });
 
 wrap.addEventListener("pointermove", (e) => {
+  // track the hovered cell for the highlight
+  const c = cellAt(e.clientX, e.clientY);
+  const hx = (c.x >= 0 && c.y >= 0 && c.x < state.W && c.y < state.H) ? c.x : -1;
+  const hy = hx >= 0 ? c.y : -1;
+  if (hx !== state.hoverX || hy !== state.hoverY) {
+    state.hoverX = hx; state.hoverY = hy;
+    scheduleRender();
+  }
+
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
@@ -303,9 +348,18 @@ wrap.addEventListener("pointermove", (e) => {
   }
 });
 
+function clearHover() {
+  if (state.hoverX !== -1 || state.hoverY !== -1) {
+    state.hoverX = -1; state.hoverY = -1;
+    scheduleRender();
+  }
+}
+wrap.addEventListener("pointerleave", clearHover);
+
 wrap.addEventListener("pointerup", (e) => {
   if (drag && !drag.moved) placeAt(e.clientX, e.clientY);
   drag = null;
+  if (e.pointerType !== "mouse") clearHover(); // touch: don't leave a stuck highlight
 });
 
 wrap.addEventListener("wheel", (e) => {

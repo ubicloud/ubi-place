@@ -46,6 +46,11 @@ body { display: flex; flex-direction: column; }
   text-shadow: 0 0 14px rgba(65,166,246,.7);
 }
 .title { font-weight: 800; letter-spacing: .5px; font-size: 18px; }
+.title.flash { animation: titleflash 1.1s ease-out; }
+@keyframes titleflash {
+  0% { color: var(--accent2); text-shadow: 0 0 18px var(--accent2); }
+  100% { color: var(--ink); text-shadow: none; }
+}
 
 .live {
   display: inline-flex; align-items: center; gap: 6px;

@@ -101,6 +101,7 @@ async function boot() {
     if (bytes[i]) paint(i, bytes[i]);
   }
 
+  applyBranding(snap);
   buildPalette();
   fitView();
   // initial scale: fit the canvas comfortably in view
@@ -133,8 +134,25 @@ function setLive(on) {
 
 // ---------- badge / stats ----------
 
+// Title/tagline come from config (the Secret Store on Ubicloud). Applied from the
+// snapshot on load and from each heartbeat — so a redeploy with a new TITLE
+// updates the header live as web replicas roll.
+let prevTitle = null;
+function applyBranding(s) {
+  const title = s.title || "Ubiplace";
+  const tagline = s.tagline || "";
+  const el = document.getElementById("app-title");
+  if (el && el.textContent !== title) {
+    el.textContent = title;
+    if (prevTitle !== null && prevTitle !== title) flashEl(el);
+  }
+  document.title = tagline ? `${title} — ${tagline}` : title;
+  prevTitle = title;
+}
+
 let prev = { version: null, instance: null };
 function updateBadge(s) {
+  applyBranding(s);
   setText("stat-version", s.version);
   setText("stat-instance", s.instance);
   setText("stat-uptime", fmtUptime(s.uptime));
@@ -156,8 +174,9 @@ function updateBadge(s) {
   }
 }
 
-function flash(id) {
-  const el = document.getElementById(id);
+function flash(id) { flashEl(document.getElementById(id)); }
+function flashEl(el) {
+  if (!el) return;
   el.classList.remove("flash");
   void el.offsetWidth; // restart animation
   el.classList.add("flash");

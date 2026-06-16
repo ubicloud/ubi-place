@@ -11,9 +11,9 @@ require "pg"
 # across every replica. Subscribers also get a periodic tick from their own 1s
 # queue timeout, which both drives heartbeats and covers any missed notification.
 class Notifier
-  def initialize(url, channel)
-    @url = url
+  def initialize(channel, &connect)
     @channel = channel
+    @connect = connect # () -> a raw PG connection
     @subs = []
     @mutex = Mutex.new
   end
@@ -41,7 +41,7 @@ class Notifier
   def run
     conn = nil
     loop do
-      conn = PG.connect(@url)
+      conn = @connect.call
       conn.exec("LISTEN #{@channel}")
       loop { conn.wait_for_notify(30) { broadcast } }
     rescue => e

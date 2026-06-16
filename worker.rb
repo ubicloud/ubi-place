@@ -83,7 +83,7 @@ db = DB_CONN
 db[:painter].insert_conflict.insert(id: AMBIENT_ID, name: "🤖 ambient-bot", created_at: Time.now) if AMBIENT
 
 # Dedicated raw connection to wake instantly when the web process enqueues work.
-listener = PG.connect(DB.url)
+listener = DB.raw_pg
 listener.exec("LISTEN placement_queued")
 
 warn "worker up: ambient=#{AMBIENT} snapshot_interval=#{SNAPSHOT_INTERVAL}s"

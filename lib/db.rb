@@ -1,19 +1,51 @@
 # frozen_string_literal: true
 
 require "sequel"
+require "pg"
 
 # Database wiring shared by the web and worker processes.
+#
+# Two connection modes, resolved automatically:
+#   * DATABASE_URL set  -> use it (handy for local dev).
+#   * otherwise         -> connect straight from libpq env. On Ubicloud the
+#     attached Postgres uses MANAGED-IDENTITY cert auth: the deploy step uses the
+#     VM's managed identity to fetch a client cert and exposes standard libpq env
+#     (PGHOST/PGPORT/PGDATABASE/PGUSER + PGSSLMODE/PGSSLROOTCERT/PGSSLCERT/
+#     PGSSLKEY). There is NO password and NO DATABASE_URL — the client cert is the
+#     credential — so we let libpq read it all from the environment.
 module DB
   module_function
 
-  # The platform injects DATABASE_URL (as a Secret Store key) when a Postgres is
-  # attached. Locally we fall back to a dev database.
   def url
-    ENV["DATABASE_URL"] || "postgres:///ubiplace"
+    u = ENV["DATABASE_URL"]
+    (u && !u.empty?) ? u : nil
+  end
+
+  # True when the platform (or the developer) has provided libpq connection env.
+  def libpq_env?
+    %w[PGHOST PGDATABASE PGUSER PGSSLCERT].any? { |k| ENV[k] && !ENV[k].empty? }
   end
 
   def connect
-    Sequel.connect(url, max_connections: Integer(ENV.fetch("DB_POOL", "10")))
+    opts = { max_connections: Integer(ENV.fetch("DB_POOL", "10")) }
+    if (u = url)
+      Sequel.connect(u, opts)
+    elsif libpq_env?
+      Sequel.connect(opts.merge(adapter: "postgres")) # managed-identity cert auth
+    else
+      Sequel.connect("postgres:///ubiplace", opts)     # bare local-dev default
+    end
+  end
+
+  # Raw pg connection for LISTEN/NOTIFY, using the same auth resolution.
+  def raw_pg
+    if (u = url)
+      PG.connect(u)
+    elsif libpq_env?
+      PG.connect
+    else
+      PG.connect("postgres:///ubiplace")
+    end
   end
 
   # Run migrations at boot, guarded by a transaction-scoped advisory lock. This

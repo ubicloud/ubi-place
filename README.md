@@ -69,11 +69,18 @@ built on. The `web` process listens on **8080** (the port the per-app load balan
 forwards to, with a TCP health check). Migrations run automatically at boot under a
 Postgres advisory lock (this platform has no release phase).
 
-## Configuration (set as app config / Secret Store keys)
+## Configuration — and how it uses the Secret Store
+
+On Ubicloud the **Config page is a thin wrapper over the app's Secret Store**. At
+each deploy the app VM's **managed identity** fetches every Secret Store key and
+the platform injects them as environment variables (at build *and* run time). So
+"using the Secret Store" simply means reading config from `ENV` — which this app
+does for everything below.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `DATABASE_URL` | — | Injected automatically when you attach Postgres. |
+| `TITLE` | `Ubiplace` | Header + page title. **Try this one to see the Secret Store in action** — it's sent in the SSE heartbeat, so a redeploy with a new `TITLE` updates the header *live as replicas roll*. |
+| `TAGLINE` | `a tiny collaborative pixel canvas` | Subtitle (used in the document title). |
 | `APP_VERSION` | contents of `VERSION` file, else `dev` | Release label in the badge. |
 | `COOLDOWN_MS` | `200` | Per-painter cooldown between placements. |
 | `AMBIENT` | `on` | Set to `off` to silence the ambient bot. |
@@ -81,25 +88,38 @@ Postgres advisory lock (this platform has no release phase).
 | `SNAPSHOT_INTERVAL` | `3` | Seconds between snapshot rebuilds. |
 | `CANVAS_WIDTH` / `CANVAS_HEIGHT` | `100` | Grid size (set before first deploy). |
 
+### Database connection (no secret needed)
+
+The attached Postgres uses **managed-identity cert auth**, not a password. On
+attach, the platform uses the VM's managed identity to fetch a client cert and
+injects standard libpq env — `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
+`PGSSLMODE=verify-full`, `PGSSLROOTCERT`, `PGSSLCERT`, `PGSSLKEY` — with **no
+stored credential**, so there's no `DATABASE_URL` in the Secret Store. `lib/db.rb`
+connects straight from that env (and falls back to `DATABASE_URL` for local dev).
+
 ---
 
 ## Deploy on Ubicloud
 
 1. **Create the app** pointing at the public repo + branch:
    `https://github.com/ubicloud/ubi-place` · `main`.
-2. **Attach Postgres** (one click) — this injects `DATABASE_URL`.
-3. **Scale `web` to ≥ 2 replicas** so the staggered rollout is visible
+2. **Attach Postgres** (one click) — the platform wires the DB to the app via the
+   VM's managed identity (mTLS client cert); no password or `DATABASE_URL` is stored.
+3. *(Optional)* set **`TITLE`** in the Config page to see the Secret Store feed the app.
+4. **Scale `web` to ≥ 2 replicas** so the staggered rollout is visible
    (worker stays a singleton).
-4. **Click Deploy.** Each replica clones the commit, `pack build`s, and comes up
+5. **Click Deploy.** Each replica clones the commit, `pack build`s, and comes up
    behind the load balancer. Open `https://<app>.ubicloud.app`.
 
 ## The zero-downtime demo
 
 1. Open the app. Note the **`ver`** (e.g. `v1`) and **`⬢ inst`** chips up top, and
    the ambient bot keeping the canvas alive. Draw a few pixels.
-2. Make a *visible* change and commit it — the most legible options:
+2. Make a *visible* change — the most legible options:
    - bump `VERSION` from `v1` to `v2`, and/or
-   - add a new color to `PALETTE` in `lib/canvas.rb`.
+   - add a new color to `PALETTE` in `lib/canvas.rb`, and/or
+   - change `TITLE` in the Config page (no code change) — it lives in the Secret
+     Store and updates the header *live* as replicas roll, no full reload.
 3. **Deploy again.** Keep the canvas in view and watch the top bar: as the
    platform swaps web replicas one at a time, the **`⬢ inst`** chip flips to new
    instance ids (it flashes on change) and **`ver`** rolls `v1 → v2`. The canvas

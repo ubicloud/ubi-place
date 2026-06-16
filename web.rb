@@ -16,10 +16,18 @@ COOLDOWN_MS = Integer(ENV.fetch("COOLDOWN_MS", "200"))
 PIXEL_CHANNEL = "pixel_update"
 PLACE_CHANNEL = "placement_queued"
 
+# Branding pulled from config. On Ubicloud these come from the app's Secret Store:
+# the VM's managed identity fetches every key at deploy and the platform injects
+# them as env (the Config page is just a wrapper over the store). Because TITLE is
+# also sent in the SSE heartbeat, redeploying with a new TITLE updates the header
+# live as web replicas roll over — the Secret Store woven into the deploy demo.
+TITLE = ENV["TITLE"].to_s.empty? ? "Ubiplace" : ENV["TITLE"]
+TAGLINE = ENV["TAGLINE"].to_s.empty? ? "a tiny collaborative pixel canvas" : ENV["TAGLINE"]
+
 # Boot: connect, make sure the schema exists, start the LISTEN bridge.
 DB_CONN = DB.connect
 DB.migrate!(DB_CONN)
-NOTIFIER = Notifier.new(DB.url, PIXEL_CHANNEL).start
+NOTIFIER = Notifier.new(PIXEL_CHANNEL) { DB.raw_pg }.start
 
 # Process-wide 1s cache so a crowd of SSE heartbeats doesn't hammer the DB.
 STATS_LOCK = Mutex.new
@@ -68,6 +76,8 @@ class Web < Roda
       if Time.now - STATS_CACHE[:at] > 1
         STATS_CACHE[:at] = Time.now
         STATS_CACHE[:data] = {
+          title: TITLE,
+          tagline: TAGLINE,
           instance: AppVersion::INSTANCE,
           version: AppVersion::VERSION,
           uptime: (Time.now - AppVersion::BOOT_AT).round,
@@ -108,6 +118,7 @@ class Web < Roda
       data = row ? row[:data] : ("\x00".b * Canvas::SIZE)
       seq = row ? row[:seq] : 0
       json(
+        title: TITLE, tagline: TAGLINE,
         width: Canvas::WIDTH, height: Canvas::HEIGHT, palette: Canvas::PALETTE,
         cooldown_ms: COOLDOWN_MS, seq: seq, data: Base64.strict_encode64(data)
       )

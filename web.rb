@@ -246,13 +246,14 @@ class Web < Roda
       cursor = (request.env["HTTP_LAST_EVENT_ID"] || request.params["since"] || "0").to_i
       queue = NOTIFIER.subscribe
       stream(loop: false) do |out|
+        out << "retry: 1000\n\n" # reconnect ~1s after a drop (browser default is ~3s)
         out << sse_event("heartbeat", stats)
         last_beat = Time.now
         loop do
           queue.pop(timeout: 1) # woken by NOTIFY, or 1s tick
           changes, cursor = diff_since(cursor)
           out << "id: #{cursor}\nevent: pixels\ndata: #{JSON.generate(changes)}\n\n" unless changes.empty?
-          if Time.now - last_beat >= 3
+          if Time.now - last_beat >= 1 # heartbeat every ~1s so the client watchdog can detect a dead stream fast
             out << sse_event("heartbeat", stats)
             last_beat = Time.now
           end

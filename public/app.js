@@ -163,7 +163,7 @@ function showAdmin(ambient) {
 // stale and the badge stays "live" forever. Guard against that with a watchdog:
 // the server sends a heartbeat every ~3s, so if nothing arrives for STALE_MS we
 // treat the stream as dead and force a fresh reconnect (resuming from state.seq).
-const STALE_MS = 10000;
+const STALE_MS = 3000; // ~3 missed 1s heartbeats => treat the stream as dead
 let es = null;
 let lastBeat = 0;
 let watchdog = null;
@@ -190,7 +190,7 @@ function connect() {
       setLive(false);
       connect(); // closes the dead stream and reconnects, resuming from state.seq
     }
-  }, 3000);
+  }, 1000);
 }
 
 function setLive(on) {

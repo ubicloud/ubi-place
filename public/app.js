@@ -157,15 +157,40 @@ function showAdmin(ambient) {
 
 // ---------- live stream ----------
 
+// The browser fires onerror (and auto-reconnects) only when it *notices* the
+// socket close. A half-open connection — e.g. when a web server is recycled and
+// its VM is destroyed mid-deploy — is never noticed, so the stream silently goes
+// stale and the badge stays "live" forever. Guard against that with a watchdog:
+// the server sends a heartbeat every ~3s, so if nothing arrives for STALE_MS we
+// treat the stream as dead and force a fresh reconnect (resuming from state.seq).
+const STALE_MS = 10000;
+let es = null;
+let lastBeat = 0;
+let watchdog = null;
+
 function connect() {
-  const es = new EventSource(`/events?since=${state.seq}`);
+  if (es) es.close();
+  if (watchdog) clearInterval(watchdog);
+
+  es = new EventSource(`/events?since=${state.seq}`);
+  lastBeat = Date.now();
+  const beat = () => { lastBeat = Date.now(); };
+
   es.addEventListener("pixels", (e) => {
+    beat();
     if (e.lastEventId) state.seq = parseInt(e.lastEventId, 10);
     applyChanges(JSON.parse(e.data));
   });
-  es.addEventListener("heartbeat", (e) => updateBadge(JSON.parse(e.data)));
-  es.onopen = () => setLive(true);
+  es.addEventListener("heartbeat", (e) => { beat(); updateBadge(JSON.parse(e.data)); });
+  es.onopen = () => { beat(); setLive(true); };
   es.onerror = () => setLive(false); // EventSource auto-reconnects with Last-Event-ID
+
+  watchdog = setInterval(() => {
+    if (Date.now() - lastBeat > STALE_MS) {
+      setLive(false);
+      connect(); // closes the dead stream and reconnects, resuming from state.seq
+    }
+  }, 3000);
 }
 
 function setLive(on) {

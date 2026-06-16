@@ -31,9 +31,11 @@ AMBIENT_DEFAULT = ENV.fetch("AMBIENT", "on") == "on"
 TITLE = ENV["TITLE"].to_s.empty? ? "Ubiplace" : ENV["TITLE"]
 TAGLINE = ENV["TAGLINE"].to_s.empty? ? "a tiny collaborative pixel canvas" : ENV["TAGLINE"]
 
-# Boot: connect, make sure the schema exists, start the LISTEN bridge.
+# Boot: connect, ensure schema, drop any now-out-of-bounds canvas data (e.g. after
+# a board resize), start the LISTEN bridge.
 DB_CONN = DB.connect
 DB.migrate!(DB_CONN)
+DB.prune_canvas!(DB_CONN, Canvas::WIDTH, Canvas::HEIGHT)
 NOTIFIER = Notifier.new(PIXEL_CHANNEL) { DB.raw_pg }.start
 
 # Process-wide 1s cache so a crowd of SSE heartbeats doesn't hammer the DB.
@@ -150,8 +152,15 @@ class Web < Roda
     # Packed full canvas for a fast first paint.
     r.get "snapshot" do
       row = db[:snapshot].where(id: 1).first
-      data = row ? row[:data] : ("\x00".b * Canvas::SIZE)
-      seq = row ? row[:seq] : 0
+      # Ignore a stale-sized snapshot (left over from a board resize until the
+      # worker rebuilds it): serve an empty board and let the client backfill.
+      if row && row[:data].to_s.bytesize == Canvas::SIZE
+        data = row[:data]
+        seq = row[:seq]
+      else
+        data = "\x00".b * Canvas::SIZE
+        seq = 0
+      end
       json(
         title: TITLE, tagline: TAGLINE,
         width: Canvas::WIDTH, height: Canvas::HEIGHT, palette: Canvas::PALETTE,

@@ -48,6 +48,17 @@ module DB
     end
   end
 
+  # Drop canvas data that no longer fits the current board (e.g. after shrinking
+  # WIDTH/HEIGHT). Out-of-bounds pixels must go: the client index is y*WIDTH+x, so
+  # a stale (70,10) would collide with a valid cell once the board is 50 wide. Also
+  # invalidate a stale-sized snapshot so the worker rebuilds it at the new size.
+  def prune_canvas!(db, width, height)
+    db[:pixel].where { (x >= width) | (y >= height) }.delete
+    db[:placement].where { (x >= width) | (y >= height) }.delete
+    snap = db[:snapshot].where(id: 1).first
+    db[:snapshot].where(id: 1).delete if snap && snap[:data].to_s.bytesize != width * height
+  end
+
   # Run migrations at boot, guarded by a transaction-scoped advisory lock. This
   # platform has no "release" phase, and several web/worker replicas boot at once
   # (and on every deploy) — the lock makes exactly one of them migrate while the

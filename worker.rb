@@ -81,6 +81,8 @@ def ambient_tick(db, tick)
 end
 
 db = DB_CONN
+# Drop any canvas data that no longer fits the board (e.g. after a resize).
+DB.prune_canvas!(db, Canvas::WIDTH, Canvas::HEIGHT)
 # Always ensure the ambient painter exists so the bot can be toggled on later.
 db[:painter].insert_conflict.insert(id: AMBIENT_ID, name: "🤖 ambient-bot", created_at: Time.now)
 # AMBIENT env is just the initial default; admin can flip it live via the setting.

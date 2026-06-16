@@ -3,8 +3,8 @@
 # Canvas geometry + palette. Colors are stored as palette indices (one byte per
 # cell) so the whole canvas packs into WIDTH*HEIGHT bytes for the snapshot.
 module Canvas
-  WIDTH = Integer(ENV.fetch("CANVAS_WIDTH", "100"))
-  HEIGHT = Integer(ENV.fetch("CANVAS_HEIGHT", "100"))
+  WIDTH = Integer(ENV.fetch("CANVAS_WIDTH", "50"))
+  HEIGHT = Integer(ENV.fetch("CANVAS_HEIGHT", "50"))
   SIZE = WIDTH * HEIGHT
 
   # Index 0 is the empty/background cell. This list is intentionally easy to

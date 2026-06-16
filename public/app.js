@@ -304,12 +304,14 @@ function fmtUptime(s) {
 function buildPalette() {
   const bar = document.getElementById("palette");
   bar.innerHTML = "";
+  // Index 0 is the background color, exposed as the first swatch so it doubles as
+  // an eraser: painting it resets a cell to the background.
   state.palette.forEach((hex, i) => {
-    if (i === 0) return; // index 0 is the background / eraser-ish
     const sw = document.createElement("button");
-    sw.className = "swatch" + (i === state.color ? " sel" : "");
-    sw.style.background = hex;
-    sw.title = hex;
+    sw.className = "swatch" + (i === state.color ? " sel" : "") + (i === 0 ? " eraser" : "");
+    sw.style.backgroundColor = hex;
+    sw.dataset.idx = i;
+    sw.title = i === 0 ? "eraser — paints the background" : hex;
     sw.addEventListener("click", () => selectColor(i));
     bar.appendChild(sw);
   });
@@ -317,8 +319,8 @@ function buildPalette() {
 
 function selectColor(i) {
   state.color = i;
-  [...document.querySelectorAll(".swatch")].forEach((s, idx) =>
-    s.classList.toggle("sel", idx + 1 === i));
+  document.querySelectorAll(".swatch").forEach((s) =>
+    s.classList.toggle("sel", Number(s.dataset.idx) === i));
   scheduleRender(); // refresh the hover preview to the new color
 }
 

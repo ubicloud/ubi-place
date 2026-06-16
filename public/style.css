@@ -187,6 +187,10 @@ code {
   border-color: #fff; transform: translateY(-5px) scale(1.08);
   box-shadow: 0 0 0 2px var(--bg), 0 0 16px rgba(255,255,255,.4);
 }
+/* eraser = the background color; a diagonal slash signals "erase / none" */
+.swatch.eraser {
+  background-image: linear-gradient(135deg, transparent 42%, var(--hot) 42%, var(--hot) 58%, transparent 58%);
+}
 
 /* ---------- toast ---------- */
 .toast {

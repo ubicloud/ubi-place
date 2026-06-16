@@ -20,7 +20,7 @@ const state = {
   lastPlace: 0,
 };
 
-const GRID_MIN_SCALE = 6; // only draw gridlines once cells are this big (px)
+const BOTTOM_RESERVE = 96; // keep the board above the floating palette bar
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -53,8 +53,8 @@ function render() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(state.off, state.ox, state.oy, state.W * s, state.H * s);
 
-  // gridlines — only when zoomed in enough to be legible; clipped to the viewport
-  if (s >= GRID_MIN_SCALE) {
+  // gridlines — always on, clipped to the viewport (skip only sub-pixel zoom-out)
+  if (s >= 2) {
     const x0 = Math.max(0, Math.floor(-state.ox / s)), x1 = Math.min(state.W, Math.ceil((canvas.width - state.ox) / s));
     const y0 = Math.max(0, Math.floor(-state.oy / s)), y1 = Math.min(state.H, Math.ceil((canvas.height - state.oy) / s));
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
@@ -86,7 +86,7 @@ function render() {
 
 function centerView() {
   state.ox = (canvas.width - state.W * state.scale) / 2;
-  state.oy = (canvas.height - state.H * state.scale) / 2;
+  state.oy = Math.max(8, ((canvas.height - BOTTOM_RESERVE) - state.H * state.scale) / 2);
 }
 
 // ---------- pixel application ----------
@@ -138,9 +138,12 @@ async function boot() {
   applyBranding(snap);
   buildPalette();
   fitView();
-  // initial scale: fit-to-view, then 2x for chunkier pixels (pan to see the rest)
-  const fit = Math.min(canvas.width / state.W, canvas.height / state.H) * 0.82;
-  state.scale = Math.max(4, Math.floor(fit) * 2);
+  // Initial scale: fit the WHOLE board within the viewport (above the palette), as
+  // large as it goes. Pixels are maximized while the board stays fully visible —
+  // no overflow. (Going bigger than this is what overflowed the viewport before.)
+  const availH = Math.max(50, canvas.height - BOTTOM_RESERVE);
+  const fit = Math.min(canvas.width / state.W, availH / state.H) * 0.98;
+  state.scale = Math.max(2, Math.floor(fit));
   centerView();
   render();
 

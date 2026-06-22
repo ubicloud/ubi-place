@@ -12,6 +12,11 @@ require_relative "lib/version"
 require_relative "lib/names"
 require_relative "lib/notifier"
 require_relative "lib/settings"
+require_relative "lib/log"
+
+# Shared logger for this web process. Request lines come from Log::Middleware
+# (wired in config.ru); everything else logs through this directly.
+LOG = Log.new("web")
 
 COOLDOWN_MS = Integer(ENV.fetch("COOLDOWN_MS", "200"))
 PIXEL_CHANNEL = "pixel_update"
@@ -36,7 +41,8 @@ TAGLINE = ENV["TAGLINE"].to_s.empty? ? "a tiny collaborative pixel canvas" : ENV
 DB_CONN = DB.connect
 DB.migrate!(DB_CONN)
 DB.prune_canvas!(DB_CONN, Canvas::WIDTH, Canvas::HEIGHT)
-NOTIFIER = Notifier.new(PIXEL_CHANNEL) { DB.raw_pg }.start
+NOTIFIER = Notifier.new(PIXEL_CHANNEL, logger: LOG) { DB.raw_pg }.start
+LOG.info("web up version=#{AppVersion::VERSION} cooldown_ms=#{COOLDOWN_MS} title=#{TITLE.inspect}")
 
 # Process-wide 1s cache so a crowd of SSE heartbeats doesn't hammer the DB.
 STATS_LOCK = Mutex.new

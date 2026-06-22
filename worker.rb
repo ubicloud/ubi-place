@@ -21,6 +21,9 @@ require_relative "lib/db"
 require_relative "lib/canvas"
 require_relative "lib/names"
 require_relative "lib/settings"
+require_relative "lib/log"
+
+LOG = Log.new("worker")
 
 SNAPSHOT_INTERVAL = Float(ENV.fetch("SNAPSHOT_INTERVAL", "3"))
 AMBIENT = ENV.fetch("AMBIENT", "on") == "on"
@@ -52,6 +55,7 @@ def drain(db)
     db[:placement].where(id: rows.map { |r| r[:id] }).update(processed_at: Time.now)
   end
   db.run("NOTIFY pixel_update")
+  LOG.info("drain applied=#{rows.size} notify=pixel_update")
   rows.size
 end
 
@@ -65,12 +69,14 @@ def build_snapshot(db)
   db[:snapshot]
     .insert_conflict(target: :id, update: { seq: max, data: blob, created_at: Time.now })
     .insert(id: 1, seq: max, data: blob, created_at: Time.now)
+  LOG.info("snapshot rebuilt seq=#{max} bytes=#{Canvas::SIZE}")
   max
 end
 
 # A drifting, color-cycling spray so the canvas is never static.
 def ambient_tick(db, tick)
-  3.times do |k|
+  placed = 3
+  placed.times do |k|
     t = tick + (k * 7)
     x = (Canvas::WIDTH / 2.0 + (Math.sin(t / 9.0) * Canvas::WIDTH * 0.42)).round.clamp(0, Canvas::WIDTH - 1)
     y = (Canvas::HEIGHT / 2.0 + (Math.cos(t / 13.0) * Canvas::HEIGHT * 0.42)).round.clamp(0, Canvas::HEIGHT - 1)
@@ -78,6 +84,7 @@ def ambient_tick(db, tick)
     db[:placement].insert(x: x, y: y, color: color, painter_id: AMBIENT_ID, created_at: Time.now)
   end
   db.run("NOTIFY placement_queued")
+  LOG.info("ambient tick=#{tick} placed=#{placed} notify=placement_queued")
 end
 
 db = DB_CONN
@@ -92,7 +99,8 @@ Settings.default!(db, "ambient_enabled", AMBIENT ? "true" : "false")
 listener = DB.raw_pg
 listener.exec("LISTEN placement_queued")
 
-warn "worker up: ambient_default=#{AMBIENT} snapshot_interval=#{SNAPSHOT_INTERVAL}s"
+LOG.info("worker up version=#{AppVersion::VERSION} ambient_default=#{AMBIENT} " \
+         "snapshot_interval=#{SNAPSHOT_INTERVAL}s listening=placement_queued")
 
 last_snapshot = Time.now
 last_ambient = Time.now
@@ -107,7 +115,9 @@ loop do
   now = Time.now
   # Re-read the admin toggle ~once a second (cheap single-row PK lookup).
   if now - last_setting >= 1
-    ambient_on = Settings.get_bool(db, "ambient_enabled", AMBIENT)
+    new_ambient = Settings.get_bool(db, "ambient_enabled", AMBIENT)
+    LOG.info("ambient #{new_ambient ? 'enabled' : 'disabled'}") if new_ambient != ambient_on
+    ambient_on = new_ambient
     last_setting = now
   end
   if ambient_on && (now - last_ambient) >= AMBIENT_INTERVAL
@@ -119,6 +129,6 @@ loop do
     build_snapshot(db)
   end
 rescue => e
-  warn "worker error: #{e.class}: #{e.message}"
+  LOG.error("loop error #{e.class}: #{e.message}")
   sleep 0.5
 end
